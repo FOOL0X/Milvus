@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<faq>
+    <item>
+        <question>你们的退换货政策是什么？</question>
+        <answer>自收到商品之日起7天内，如商品未经使用且包装完好，您可以申请退换货。超过7天但不满30天的，可以申请换货。定制商品不支持退换货。</answer>
+        <category>售后政策</category>
+    </item>
+    <item>
+        <question>如何申请退款？</question>
+        <answer>退款申请可通过以下步骤操作：1. 登录您的账号 2. 进入"我的订单" 3. 选择需要退款的订单 4. 点击"申请退款"按钮 5. 填写退款原因并提交。退款将在1-7个工作日内原路返回。</answer>
+        <category>退款</category>
+    </item>
+    <item>
+        <question>快递一般几天到达？</question>
+        <answer>正常情况下，快递送达时间为：- 同城快递：1-2个工作日- 省内快递：2-3个工作日- 省外快递：3-5个工作日- 偏远地区：5-7个工作日节假日可能会有延迟。</answer>
+        <category>配送</category>
+    </item>
+    <item>
+        <question>如何联系客服？</question>
+        <answer>您可以通过以下方式联系我们的客服：1. 拨打客服热线：400-xxx-xxxx（工作日9:00-18:00）2. 在线客服：点击页面右下角聊天图标3. 微信公众号：搜索"xxx客服"4. 邮箱：support@example.com</answer>
+        <category>客服</category>
+    </item>
+    <item>
+        <question>支持哪些支付方式？</question>
+        <answer>我们支持以下支付方式：1. 支付宝 2. 微信支付 3. 银行卡支付（支持国内主流银行）4. 花呗/信用卡分期付款 5. 企业转账（需联系我们开通）</answer>
+        <category>支付</category>
+    </item>
+</faq>

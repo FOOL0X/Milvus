@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Milvus 服务配置 -->
+    <service>
+        <port>19530</port>
+        <http_port>9091</http_port>
+        <log_level>info</log_level>
+        <log_file_path>/var/lib/milvus/logs</log_file_path>
+    </service>
+
+    <!-- etcd 配置 (嵌入式) -->
+    <etcd>
+        <use_embed>true</use_embed>
+        <data_dir>/var/lib/milvus/etcd</data_dir>
+        <listen_port>2379</listen_port>
+    </etcd>
+
+    <!-- 存储配置 -->
+    <storage>
+        <type>local</type>
+        <data_dir>/var/lib/milvus/files</data_dir>
+        <index_dir>/var/lib/milvus/index</index_dir>
+    </storage>
+
+    <!-- 向量索引配置 -->
+    <index>
+        <type>HNSW</type>
+        <metric_type>COSINE</metric_type>
+        <params>
+            <M>16</M>
+            <efConstruction>256</efConstruction>
+        </params>
+    </index>
+
+    <!-- Collection 默认配置 -->
+    <collection>
+        <shard_num>1</shard_num>
+        <replica_number>1</replica_number>
+        <flush_interval>1</flush_interval>
+    </collection>
+</configuration>

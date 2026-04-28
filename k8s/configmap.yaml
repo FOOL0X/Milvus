@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-config
+  namespace: customer-service
+data:
+  MILVUS_HOST: "milvus"
+  MILVUS_PORT: "19530"
+  MILVUS_URI: "http://milvus:19530"
+  DEFAULT_COLLECTION: "customer_service_kb"
+  TOP_K: "5"
+  LOG_LEVEL: "INFO"
+  CORS_ORIGINS: "*"
+  API_PREFIX: "/api"
