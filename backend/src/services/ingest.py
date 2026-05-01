@@ -1,19 +1,19 @@
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Milvus
 from pathlib import Path
 import tiktoken
-from ..core.config import settings
-from ..core.vector_store import vector_store_service
+from src.core.config import settings
+from src.core.vector_store import vector_store_service
+from src.core.embeddings import embedding_service
+from src.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class IngestService:
     def __init__(self):
-        self.embeddings = OpenAIEmbeddings(
-            model=settings.EMBEDDING_MODEL,
-            api_key=settings.OPENAI_API_KEY
-        )
+        self.embeddings = embedding_service.embeddings
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=512,
             chunk_overlap=100,
@@ -86,7 +86,7 @@ class IngestService:
 
                     all_chunks.extend(chunks)
                 except Exception as e:
-                    print(f"Error loading {file_path}: {e}")
+                    logger.error(f"Error loading {file_path}: {e}")
 
         if not all_chunks:
             return {

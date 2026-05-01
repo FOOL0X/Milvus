@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from ..models.schemas import IngestResponse
-from ...services.ingest import ingest_service
-from ...core.vector_store import vector_store_service
+from src.models.schemas import IngestResponse
+from src.services.ingest import ingest_service
+from src.core.vector_store import vector_store_service
 import tempfile
 import os
 from pathlib import Path

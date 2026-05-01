@@ -1,5 +1,10 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+# 加载项目根目录的 .env 文件
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 class Settings(BaseSettings):
@@ -10,14 +15,19 @@ class Settings(BaseSettings):
 
     # LLM 配置
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+    OPENAI_API_BASE: str = os.getenv("OPENAI_API_BASE", "https://api.minimaxi.com/v1")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "MiniMax-M2.7")
 
-    # Embedding 配置
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-    EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1536"))
+    # Ollama Embedding 配置
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    OLLAMA_EMBEDDING_MODEL: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "qwen3-embedding:0.6b-q8_0")
+
+    # Embedding 配置 (Qwen3-embedding-0.6B 本地模型)
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "models/qwen3-embedding-0.6b")
+    EMBEDDING_DIM: int = int(os.getenv("EMBEDDING_DIM", "1024"))
 
     # 向量库配置
-    DEFAULT_COLLECTION: str = os.getenv("DEFAULT_COLLECTION", "customer_service_kb")
+    DEFAULT_COLLECTION: str = os.getenv("DEFAULT_COLLECTION", "vuln_kb")
     TOP_K: int = int(os.getenv("TOP_K", "5"))
 
     # API 配置
@@ -26,6 +36,8 @@ class Settings(BaseSettings):
 
     # 会话配置
     SESSION_EXPIRE_SECONDS: int = int(os.getenv("SESSION_EXPIRE_SECONDS", "3600"))
+    SESSION_DB_PATH: str = os.getenv("SESSION_DB_PATH", "data/sessions.db")
+    SESSION_MAX_HISTORY: int = int(os.getenv("SESSION_MAX_HISTORY", "20"))
 
     class Config:
         env_file = ".env"

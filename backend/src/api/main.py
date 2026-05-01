@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import chat, ingest
-from ..models.schemas import HealthResponse
-from ..core.vector_store import vector_store_service
-from ..core.config import settings
+from src.api.routers import chat, ingest
+from src.models.schemas import HealthResponse
+from src.core.vector_store import vector_store_service
+from src.core.config import settings
 
 app = FastAPI(
     title="RAG 智能客服助手 API",

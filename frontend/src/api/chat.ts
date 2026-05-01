@@ -13,6 +13,13 @@ interface ChatResponse {
   session_id: string
 }
 
+export interface SessionInfo {
+  session_id: string
+  title: string
+  created_at: number
+  updated_at: number
+}
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
 export const sendMessage = async (req: ChatRequest): Promise<ChatResponse> => {
@@ -27,6 +34,24 @@ export const sendMessage = async (req: ChatRequest): Promise<ChatResponse> => {
   }
 
   return res.json()
+}
+
+export async function fetchSessions(): Promise<SessionInfo[]> {
+  const res = await fetch(`${API_BASE}/chat/sessions`)
+  if (!res.ok) throw new Error('Failed to fetch sessions')
+  const data = await res.json()
+  return data.sessions
+}
+
+export async function fetchChatHistory(sessionId: string): Promise<{ session_id: string; history: { role: string; content: string }[] }> {
+  const res = await fetch(`${API_BASE}/chat/history/${sessionId}`)
+  if (!res.ok) throw new Error('Failed to fetch chat history')
+  return res.json()
+}
+
+export async function deleteChatHistory(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/chat/history/${sessionId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Failed to delete chat history')
 }
 
 export function useChat() {
@@ -56,24 +81,4 @@ export function useChat() {
       setLoading(false)
     },
   })
-}
-
-export async function fetchChatHistory(sessionId: string): Promise<{ history: any[] }> {
-  const res = await fetch(`${API_BASE}/chat/history/${sessionId}`)
-
-  if (!res.ok) {
-    throw new Error('Failed to fetch chat history')
-  }
-
-  return res.json()
-}
-
-export async function deleteChatHistory(sessionId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/chat/history/${sessionId}`, {
-    method: 'DELETE',
-  })
-
-  if (!res.ok) {
-    throw new Error('Failed to delete chat history')
-  }
 }

@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker-compose up *)",
+      "Bash(uv lock *)",
+      "Bash(uv pip *)",
+      "Bash(docker-compose ps *)",
+      "Bash(docker-compose build *)",
+      "Bash(curl -s -X POST http://localhost/api/chat -H 'Content-Type: application/json' -d '{\"question\": \"你好\"}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://localhost/api/health)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\")",
+      "Bash(curl -s https://api.minimaxi.com/v1/embeddings -H 'Authorization: Bearer sk-cp-ljn9QK05dwOf0zhyyCwLRXMWjDuuY1F5JUOm_sy06A1FcZJ4qeH1RO477vdHsJa7PzC8JJFl_GUhyQkW_MEp_V_gzRK9iuGtt4uwBy5inX0rdWYuCO_Mk3g' -H 'Content-Type: application/json' -d '{\"model\": \"embo-01\", \"input\": \"test\"}')",
+      "Bash(curl -s https://api.minimaxi.com/v1/embeddings -H 'Authorization: Bearer sk-cp-ljn9QK05dwOf0zhyyCwLRXMWjDuuY1F5JUOm_sy06A1FcZJ4qeH1RO477vdHsJa7PzC8JJFl_GUhyQkW_MEp_V_gzRK9iuGtt4uwBy5inX0rdWYuCO_Mk3g' -H 'Content-Type: application/json' -d '{\"model\": \"embo-01\", \"texts\": [\"test\"], \"type\": \"db_vector\"}')",
+      "WebFetch(domain:platform.minimaxi.com)",
+      "Bash(curl -s \"https://platform.minimaxi.com/docs/guides/models-intro\")",
+      "Bash(curl -s \"https://platform.minimaxi.com/docs/api-reference/text-chat\")",
+      "Bash(curl -s \"https://platform.minimaxi.com/docs/api-reference/text-chat-openai\")",
+      "Bash(curl -s -X POST http://localhost/api/chat -H \"Content-Type: application/json\" -d '{\"question\": \"你好\"}')",
+      "Bash(docker-compose logs *)",
+      "Bash(docker exec *)"
+    ]
+  }
+}

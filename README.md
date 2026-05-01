@@ -8,9 +8,10 @@
 |------|------|
 | 前端 | React 18 + Vite + Tailwind + Zustand |
 | 后端 | FastAPI + LangChain |
-| 向量库 | Milvus 2.4+ |
+| 向量库 | Milvus 2.5 + (外部 etcd) |
 | LLM | GPT-4o / Claude 3.5 |
-| 部署 | Kubernetes |
+| 部署 | Docker Compose / Kubernetes |
+| 反向代理 | Nginx |
 
 ## 快速开始
 
@@ -21,8 +22,12 @@
 git clone https://github.com/your-org/customer-service-rag.git
 cd customer-service-rag
 
-# 设置环境变量
-export OPENAI_API_KEY=your-api-key
+# 复制环境变量文件并填入你的 API Key
+cp .env.example .env
+# 编辑 .env 文件，填入 OPENAI_API_KEY
+
+# 构建前端（如需要）
+cd frontend && npm install && npm run build && cd ..
 ```
 
 ### 2. Docker Compose 启动（开发环境）
@@ -30,7 +35,27 @@ export OPENAI_API_KEY=your-api-key
 ```bash
 docker-compose up -d
 
-# 访问 http://localhost:3000
+# 访问 http://localhost
+```
+
+### 3. 生产环境变量管理
+
+**方式一：Docker Compose (.env 文件)**
+```bash
+cp .env.example .env
+# 编辑 .env 填入密钥
+docker-compose up -d
+```
+
+**方式二：K8s Secret（生产推荐）**
+
+```bash
+# 创建 secret
+kubectl create secret generic rag-secret \
+  --from-literal=OPENAI_API_KEY=your-api-key
+
+# 部署时引用 secret
+kubectl apply -f k8s/secret.yaml
 ```
 
 ### 3. Kubernetes 部署（生产环境）
@@ -117,6 +142,9 @@ python scripts/ingest_data.py --path ./data/docs --collection customer_service_k
 # 导入 XML FAQ 文件
 python scripts/ingest_data.py --path ./data/sample_faq.xml --collection faq
 
+# 导入 Gatling 插件 XML（自动识别 plugins.xml 格式）
+python scripts/ingest_data.py --path ./plugins.xml --collection plugins
+
 # 导入 Markdown 文件
 python scripts/ingest_data.py --path ./data/sample_faq.md --collection faq
 
@@ -151,7 +179,7 @@ curl -X POST http://localhost:8000/api/ingest \
 | Word | .docx | 自动提取文本 |
 | 文本 | .txt | 纯文本文件 |
 | Markdown | .md | 自动按段落分割 |
-| XML | .xml | FAQ 专用格式 |
+| XML | .xml | FAQ 专用格式 或 Gatling 插件格式 |
 | JSON | .json | 结构化数据 |
 | SQLite | .db, .sqlite, .sqlite3 | 数据库表数据 |
 
@@ -166,4 +194,41 @@ curl -X POST http://localhost:8000/api/ingest \
         <category>售后</category>
     </item>
 </faq>
+```
+
+### Gatling 插件 XML 格式示例
+
+自动检测 `pluginid` 字段识别为插件格式：
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<RECORDS>
+    <RECORD>
+        <id>1175</id>
+        <pluginid>ce35d2823e338cf9988b396540721312</pluginid>
+        <pluginname>某产品 漏洞名称</pluginname>
+        <pluginname_en>Product Vulnerability Name</pluginname_en>
+        <productname>product</productname>
+        <description>漏洞描述内容</description>
+        <description_en>Vulnerability description</description_en>
+        <author>author</author>
+        <category>webvul_webcms</category>
+        <holetype>injection</holetype>
+        <level>3</level>
+        <cvss3>8.6</cvss3>
+        <disclosure_date>2020.12.09</disclosure_date>
+        <recommendation>修复建议</recommendation>
+        <recommendation_en>Recommendation</recommendation_en>
+    </RECORD>
+</RECORDS>
+```
+
+导入命令：
+
+```bash
+# 导入 Gatling 插件数据
+python scripts/ingest_data.py --path ./plugins.xml --collection plugins
+
+# 导入整个目录（自动识别格式）
+python scripts/ingest_data.py --path ./data/ --collection plugins
 ```

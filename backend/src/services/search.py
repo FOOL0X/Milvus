@@ -1,10 +1,10 @@
-from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
-from langchain.chains import ConversationalRetrievalChain
-from langchain_community.vectorstores import Milvus
-from ..core.embeddings import embedding_service
-from ..core.config import settings
-from ..models.schemas import SourceDoc
+from pymilvus import MilvusClient
+from rank_bm25 import BM25Okapi
+import numpy as np
+from src.core.embeddings import embedding_service
+from src.core.config import settings
+from src.models.schemas import SourceDoc
 
 
 class SearchService:
@@ -12,9 +12,17 @@ class SearchService:
         self.llm = ChatOpenAI(
             model=settings.OPENAI_MODEL,
             api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_API_BASE,
             temperature=0
         )
         self.vector_store = None
+        self._milvus_client = None
+        self._bm25_cache = {}
+
+    def _get_milvus_client(self) -> MilvusClient:
+        if self._milvus_client is None:
+            self._milvus_client = MilvusClient(uri=settings.MILVUS_URI)
+        return self._milvus_client
 
     def get_vector_store(self):
         if self.vector_store is None:
@@ -25,28 +33,175 @@ class SearchService:
             )
         return self.vector_store
 
-    def similarity_search(self, query: str, top_k: int = None) -> list[SourceDoc]:
-        if top_k is None:
-            top_k = settings.TOP_K
+    def _get_text_field(self, collection_name: str) -> str:
+        client = self._get_milvus_client()
+        info = client.describe_collection(collection_name)
+        field_names = [f["name"] for f in info["fields"]]
+        if "text" in field_names:
+            return "text"
+        if "content" in field_names:
+            return "content"
+        if "chunk_text" in field_names:
+            return "chunk_text"
+        return "text"
 
-        vector_store = self.get_vector_store()
-        docs = vector_store.similarity_search_with_score(query, k=top_k)
+    def _get_vector_field(self, collection_name: str) -> str:
+        client = self._get_milvus_client()
+        info = client.describe_collection(collection_name)
+        field_names = [f["name"] for f in info["fields"]]
+        if "dense_vector" in field_names:
+            return "dense_vector"
+        if "vector" in field_names:
+            return "vector"
+        for f in info["fields"]:
+            if f["type"] in (101, 100):
+                return f["name"]
+        return "vector"
+
+    def _get_metric_type(self, collection_name: str) -> str:
+        client = self._get_milvus_client()
+        vector_field = self._get_vector_field(collection_name)
+        indexes = client.list_indexes(collection_name)
+        for idx_name in indexes:
+            idx_info = client.describe_index(collection_name, idx_name)
+            if idx_info.get("field_name") == vector_field:
+                metric = idx_info.get("metric_type", "")
+                if metric:
+                    return metric
+        for idx_name in indexes:
+            idx_info = client.describe_index(collection_name, idx_name)
+            metric = idx_info.get("metric_type", "")
+            if metric:
+                return metric
+        return "COSINE"
+
+    def _get_pk_field(self, collection_name: str) -> str:
+        client = self._get_milvus_client()
+        info = client.describe_collection(collection_name)
+        for f in info["fields"]:
+            if f.get("is_primary", False):
+                return f["name"]
+        return "id"
+
+    def _get_bm25_index(self, collection_name: str):
+        if collection_name in self._bm25_cache:
+            return self._bm25_cache[collection_name]
+
+        client = self._get_milvus_client()
+        text_field = self._get_text_field(collection_name)
+        pk_field = self._get_pk_field(collection_name)
+        docs = client.query(
+            collection_name=collection_name,
+            output_fields=[text_field],
+            limit=10000
+        )
+
+        if not docs:
+            return None, None, []
+
+        contents = [doc[text_field] for doc in docs]
+        doc_ids = [doc[pk_field] for doc in docs]
+
+        tokenized_corpus = [text.split() for text in contents]
+        bm25 = BM25Okapi(tokenized_corpus)
+
+        self._bm25_cache[collection_name] = (bm25, doc_ids, docs)
+        return bm25, doc_ids, docs
+
+    def _hybrid_search(self, query: str, collection_name: str, top_k: int = 20, k: int = 60) -> list[SourceDoc]:
+        client = self._get_milvus_client()
+        text_field = self._get_text_field(collection_name)
+        vector_field = self._get_vector_field(collection_name)
+        metric_type = self._get_metric_type(collection_name)
+
+        query_embedding = embedding_service.embed_query(query)
+        dense_vector = query_embedding["dense"]
+
+        dense_results = client.search(
+            collection_name=collection_name,
+            data=[dense_vector],
+            limit=top_k,
+            anns_field=vector_field,
+            search_params={
+                "metric_type": metric_type,
+                "params": {"ef": 128},
+            },
+            output_fields=[text_field, "source"]
+        )
+
+        bm25, doc_ids, bm25_docs = self._get_bm25_index(collection_name)
+        if bm25 is None:
+            return self._dense_to_sources(dense_results[0], text_field)
+
+        query_tokens = query.split()
+        bm25_scores = bm25.get_scores(query_tokens)
+
+        bm25_top_indices = np.argsort(bm25_scores)[::-1][:top_k]
+        bm25_results = [
+            (doc_ids[idx], bm25_scores[idx])
+            for idx in bm25_top_indices
+            if bm25_scores[idx] > 0
+        ]
+
+        dense_rank_map = {hit["id"]: rank for rank, hit in enumerate(dense_results[0])}
+        bm25_rank_map = {doc_id: rank for rank, (doc_id, _) in enumerate(bm25_results)}
+
+        all_doc_ids = set(dense_rank_map.keys()) | set(bm25_rank_map.keys())
+
+        rrf_scores = {}
+        for doc_id in all_doc_ids:
+            dense_rank = dense_rank_map.get(doc_id, top_k)
+            bm25_rank = bm25_rank_map.get(doc_id, len(bm25_results))
+            rrf_scores[doc_id] = 1 / (k + dense_rank) + 1 / (k + bm25_rank)
+
+        sorted_doc_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)[:top_k]
+
+        pk_field = self._get_pk_field(collection_name)
+
+        doc_map = {doc[pk_field]: doc for doc in bm25_docs}
 
         sources = []
-        for doc, score in docs:
-            sources.append(SourceDoc(
-                content=doc.page_content,
-                source=doc.metadata.get("source", "unknown"),
-                score=round(score, 4)
-            ))
+        for rank, doc_id in enumerate(sorted_doc_ids):
+            doc = doc_map.get(doc_id)
+            if doc:
+                sources.append(SourceDoc(
+                    content=doc.get(text_field, ""),
+                    source=doc.get("source", "unknown"),
+                    score=round(rrf_scores[doc_id], 4)
+                ))
 
         return sources
 
-    def get_retriever(self, top_k: int = None):
-        vector_store = self.get_vector_store()
-        return vector_store.as_retriever(
-            search_kwargs={"k": top_k or settings.TOP_K}
-        )
+    def _dense_to_sources(self, dense_results: list, text_field: str = "text") -> list[SourceDoc]:
+        sources = []
+        for hit in dense_results:
+            entity = hit.get("entity", hit)
+            sources.append(SourceDoc(
+                content=entity.get(text_field, entity.get("content", "")),
+                source=entity.get("source", "unknown"),
+                score=round(hit.get("distance", 0), 4)
+            ))
+        return sources
+
+    def similarity_search(self, query: str, top_k: int = None, hybrid: bool = True) -> list[SourceDoc]:
+        if top_k is None:
+            top_k = settings.TOP_K
+
+        collection = settings.DEFAULT_COLLECTION
+
+        if hybrid:
+            return self._hybrid_search(query, collection, top_k)
+        else:
+            vector_store = self.get_vector_store()
+            docs = vector_store.similarity_search_with_score(query, k=top_k)
+            sources = []
+            for doc, score in docs:
+                sources.append(SourceDoc(
+                    content=doc.page_content,
+                    source=doc.metadata.get("source", "unknown"),
+                    score=round(score, 4)
+                ))
+            return sources
 
 
 class ChatService:
@@ -54,6 +209,7 @@ class ChatService:
         self.llm = ChatOpenAI(
             model=settings.OPENAI_MODEL,
             api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_API_BASE,
             temperature=0
         )
         self.search_service = SearchService()
@@ -62,39 +218,36 @@ class ChatService:
         if chat_history is None:
             chat_history = []
 
-        retriever = self.search_service.get_retriever(top_k)
+        docs = self.search_service.similarity_search(question, top_k or settings.TOP_K)
 
-        chain = ConversationalRetrievalChain.from_llm(
-            llm=self.llm,
-            retriever=retriever,
-            return_source_documents=True,
-            combine_docs_chain_kwargs={
-                "prompt": self._get_prompt()
-            }
-        )
+        context = "\n\n".join([doc.content for doc in docs])
+        history_text = "\n".join([f"用户: {msg['content']}" for msg in chat_history if msg.get("role") == "user"])
 
-        result = chain.invoke({
-            "question": question,
-            "chat_history": [(msg["content"], "") for msg in chat_history if msg["role"] == "user"]
+        prompt = self._get_prompt().invoke({
+            "context": context,
+            "chat_history": history_text,
+            "question": question
         })
 
+        response = self.llm.invoke(prompt)
+
         sources = []
-        for doc in result.get("source_documents", []):
+        for doc in docs:
             sources.append(SourceDoc(
-                content=doc.page_content,
-                source=doc.metadata.get("source", "unknown"),
-                score=None
+                content=doc.content,
+                source=doc.source,
+                score=doc.score
             ))
 
         return {
-            "answer": result["answer"],
+            "answer": response.content if hasattr(response, 'content') else str(response),
             "sources": sources
         }
 
     def _get_prompt(self):
         from langchain_core.prompts import ChatPromptTemplate
 
-        template = """你是一个专业的智能客服助手。请根据提供的参考文档回答用户问题。
+        template = """你是一个专业的漏洞安全智能客服助手。请根据提供的漏洞参考文档回答用户关于安全漏洞的问题。
 
 参考文档:
 {context}
@@ -109,6 +262,8 @@ class ChatService:
 2. 如果参考文档中没有相关信息，请明确告知用户
 3. 回答要准确、专业、友好
 4. 保持对话的连贯性
+5. 回答漏洞相关问题时，请包含：漏洞名称、影响产品、漏洞类型、危险等级、CVSS评分、漏洞描述、修复建议等信息
+6. 如果用户询问某个产品的漏洞，请列出相关的所有漏洞
 
 回答:"""
 

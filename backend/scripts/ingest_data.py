@@ -13,19 +13,71 @@ Milvus 数据导入脚本
     python scripts/ingest_data.py --path ./data/docs --collection customer_service_kb
 """
 
+import sys
+import os
+from pathlib import Path
+
+# 添加 backend 目录到路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# 加载项目根目录的 .env 文件
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
+
 import argparse
 import json
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from typing import Any
 
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Milvus
 import tiktoken
+from rank_bm25 import BM25Okapi
+import numpy as np
 
 from src.core.config import settings
+from src.core.embeddings import embedding_service
+from src.core.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class BM25SparseVector:
+    """BM25 稀疏向量生成器"""
+
+    def __init__(self):
+        self.bm25 = None
+        self.tokenized_corpus = []
+        self.doc_count = 0
+
+    def fit(self, texts: list[str]):
+        """构建 BM25 索引"""
+        self.tokenized_corpus = [text.split() for text in texts]
+        self.bm25 = BM25Okapi(self.tokenized_corpus)
+        self.doc_count = len(texts)
+        logger.info(f"BM25 index built for {self.doc_count} documents")
+
+    def get_sparse_vector(self, text: str) -> dict:
+        """获取文本的稀疏向量 (BM25 scores as weights)"""
+        if self.bm25 is None:
+            raise ValueError("BM25 index not built. Call fit() first.")
+
+        tokens = text.split()
+        scores = self.bm25.get_scores(tokens)
+
+        # 转换为稀疏格式: {index: score}
+        # 只保留非零权重
+        sparse = {}
+        for idx, score in enumerate(scores):
+            if score > 0:
+                sparse[idx] = float(score)
+
+        return sparse
+
+    def get_sparse_vectors_batch(self, texts: list[str]) -> list[dict]:
+        """批量获取稀疏向量"""
+        return [self.get_sparse_vector(text) for text in texts]
 
 
 def parse_xml(file_path: str) -> list[str]:
@@ -154,7 +206,7 @@ def parse_sqlite(file_path: str) -> list[str]:
                         texts.append(text)
 
             except Exception as e:
-                print(f"Error reading table {table_name}: {e}")
+                logger.error(f"Error reading table {table_name}: {e}")
 
     finally:
         conn.close()
@@ -249,10 +301,7 @@ def ingest_directory(
 ) -> dict:
     """导入目录中的所有文档到 Milvus"""
 
-    embeddings = OpenAIEmbeddings(
-        model=settings.EMBEDDING_MODEL,
-        api_key=settings.OPENAI_API_KEY
-    )
+    embeddings = embedding_service.embeddings
 
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
@@ -276,23 +325,23 @@ def ingest_directory(
             continue
 
         try:
-            print(f"Processing: {file_path}")
+            logger.info(f"Processing: {file_path}")
 
             if suffix == ".xml":
                 texts = parse_xml(str(file_path))
-                from langchain.schema import Document
+                from langchain_core.documents import Document
                 docs = [Document(page_content=text, metadata={"source": str(file_path.name)}) for text in texts]
             elif suffix == ".json":
                 texts = parse_json(str(file_path))
-                from langchain.schema import Document
+                from langchain_core.documents import Document
                 docs = [Document(page_content=text, metadata={"source": str(file_path.name)}) for text in texts]
             elif suffix == ".md":
                 texts = parse_markdown(str(file_path))
-                from langchain.schema import Document
+                from langchain_core.documents import Document
                 docs = [Document(page_content=text, metadata={"source": str(file_path.name)}) for text in texts]
             elif suffix in {".db", ".sqlite", ".sqlite3"}:
                 texts = parse_sqlite(str(file_path))
-                from langchain.schema import Document
+                from langchain_core.documents import Document
                 docs = [Document(page_content=text, metadata={"source": str(file_path.name)}) for text in texts]
             else:
                 docs = load_document(str(file_path))
@@ -305,10 +354,10 @@ def ingest_directory(
             all_chunks.extend(chunks)
             files_processed += 1
 
-            print(f"  -> {len(chunks)} chunks created")
+            logger.info(f"  -> {len(chunks)} chunks created")
 
         except Exception as e:
-            print(f"Error processing {file_path}: {e}")
+            logger.error(f"Error processing {file_path}: {e}")
 
     if not all_chunks:
         return {
@@ -317,7 +366,7 @@ def ingest_directory(
             "chunks_created": 0,
         }
 
-    print(f"\nIngesting {len(all_chunks)} chunks to Milvus...")
+    logger.info(f"\nIngesting {len(all_chunks)} chunks to Milvus...")
 
     vector_store = Milvus.from_documents(
         documents=all_chunks,
@@ -334,7 +383,173 @@ def ingest_directory(
     }
 
 
-def ingest_xml FAQ(file_path: str, collection_name: str = "faq") -> dict:
+def ingest_plugins_xml(file_path: str, collection_name: str = "plugins") -> dict:
+    """专用 Gatling 插件 XML 导入 (dense + sparse BM25 vectors)
+
+    XML 格式: <RECORDS><RECORD>...</RECORD></RECORDS>
+    """
+    from pymilvus import MilvusClient, DataType
+
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+
+    docs = []
+    for record in root.findall(".//RECORD"):
+        plugin_id = record.find("pluginid")
+        plugin_name = record.find("pluginname")
+        plugin_name_en = record.find("pluginname_en")
+        product_name = record.find("productname")
+        description = record.find("description")
+        description_en = record.find("description_en")
+        holetype = record.find("holetype")
+        level = record.find("level")
+        cvss3 = record.find("cvss3")
+        author = record.find("author")
+        category = record.find("category")
+        recommendation = record.find("recommendation")
+        recommendation_en = record.find("recommendation_en")
+        vulid = record.find("vulid")
+
+        content_parts = []
+        if plugin_name is not None and plugin_name.text:
+            content_parts.append(f"漏洞名称: {plugin_name.text}")
+        if plugin_name_en is not None and plugin_name_en.text:
+            content_parts.append(f"Plugin Name: {plugin_name_en.text}")
+        if product_name is not None and product_name.text:
+            content_parts.append(f"产品: {product_name.text}")
+        if description is not None and description.text:
+            content_parts.append(f"漏洞描述: {description.text}")
+        if description_en is not None and description_en.text:
+            content_parts.append(f"Description: {description_en.text}")
+        if recommendation is not None and recommendation.text:
+            content_parts.append(f"修复建议: {recommendation.text}")
+        if recommendation_en is not None and recommendation_en.text:
+            content_parts.append(f"Recommendation: {recommendation_en.text}")
+        if vulid is not None and vulid.text:
+            content_parts.append(f"漏洞编号: {vulid.text}")
+
+        content = "\n".join(content_parts)
+
+        metadata = {
+            "source": Path(file_path).name,
+            "plugin_id": plugin_id.text if plugin_id is not None and plugin_id.text else "",
+            "plugin_name": plugin_name.text if plugin_name is not None and plugin_name.text else "",
+            "plugin_name_en": plugin_name_en.text if plugin_name_en is not None and plugin_name_en.text else "",
+            "product_name": product_name.text if product_name is not None and product_name.text else "",
+            "category": category.text if category is not None and category.text else "",
+            "holetype": holetype.text if holetype is not None and holetype.text else "",
+            "level": level.text if level is not None and level.text else "",
+            "cvss3": cvss3.text if cvss3 is not None and cvss3.text else "",
+            "author": author.text if author is not None and author.text else "",
+            "vulid": vulid.text if vulid is not None and vulid.text else "",
+        }
+
+        if content.strip():
+            docs.append({"content": content, "metadata": metadata})
+
+    if not docs:
+        return {"status": "no_data", "items": 0}
+
+    client = MilvusClient(uri=settings.MILVUS_URI)
+
+    if client.has_collection(collection_name):
+        logger.info(f"Dropping existing collection: {collection_name}")
+        client.drop_collection(collection_name)
+
+    schema = MilvusClient.create_schema(
+        auto_id=True,
+        enable_dynamic_field=True,
+        description="Gatling security plugins with dense + BM25 sparse vectors"
+    )
+
+    schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
+    schema.add_field(field_name="content", datatype=DataType.VARCHAR, max_length=65535)
+    schema.add_field(field_name="dense_vector", datatype=DataType.FLOAT_VECTOR, dim=1024)
+    schema.add_field(field_name="sparse_vector", datatype=DataType.SPARSE_FLOAT_VECTOR)
+
+    schema.add_field(field_name="plugin_id", datatype=DataType.VARCHAR, max_length=128)
+    schema.add_field(field_name="plugin_name", datatype=DataType.VARCHAR, max_length=512)
+    schema.add_field(field_name="plugin_name_en", datatype=DataType.VARCHAR, max_length=512)
+    schema.add_field(field_name="product_name", datatype=DataType.VARCHAR, max_length=512)
+    schema.add_field(field_name="category", datatype=DataType.VARCHAR, max_length=128)
+    schema.add_field(field_name="holetype", datatype=DataType.VARCHAR, max_length=64)
+    schema.add_field(field_name="level", datatype=DataType.VARCHAR, max_length=32)
+    schema.add_field(field_name="cvss3", datatype=DataType.VARCHAR, max_length=32)
+    schema.add_field(field_name="author", datatype=DataType.VARCHAR, max_length=128)
+    schema.add_field(field_name="vulid", datatype=DataType.VARCHAR, max_length=128)
+    schema.add_field(field_name="source", datatype=DataType.VARCHAR, max_length=256)
+
+    index_params = client.prepare_index_params()
+    index_params.add_index(field_name="dense_vector", index_type="HNSW", params={"M": 16, "efConstruction": 200}, metric_type="COSINE")
+    # Sparse vector 使用 inverted index，不指定 BM25 metric type (BM25 是用于 ranking function 的)
+    index_params.add_index(field_name="sparse_vector", index_type="SPARSE_INVERTED_INDEX", params={}, metric_type="IP")
+
+    client.create_collection(
+        collection_name=collection_name,
+        schema=schema,
+        index_params=index_params
+    )
+
+    # Build BM25 index for sparse vectors
+    logger.info(f"Building BM25 index for {len(docs)} documents...")
+    all_contents = [doc["content"] for doc in docs]
+    bm25_sparse = BM25SparseVector()
+    bm25_sparse.fit(all_contents)
+
+    # Stream: one doc at a time → embed → buffer → batch insert
+    insert_batch_size = 100
+    buffer = []
+    total_inserted = 0
+
+    for i, doc in enumerate(docs):
+        # 单条 embedding
+        content = doc["content"]
+        emb_result = embedding_service.embed_documents([content])
+        dense_vec = emb_result["dense"][0]
+        sparse_vec = bm25_sparse.get_sparse_vector(content)
+
+        entity = {
+            "content": content,
+            "dense_vector": dense_vec,
+            "sparse_vector": sparse_vec,
+            "plugin_id": doc["metadata"]["plugin_id"],
+            "plugin_name": doc["metadata"]["plugin_name"],
+            "plugin_name_en": doc["metadata"]["plugin_name_en"],
+            "product_name": doc["metadata"]["product_name"],
+            "category": doc["metadata"]["category"],
+            "holetype": doc["metadata"]["holetype"],
+            "level": doc["metadata"]["level"],
+            "cvss3": doc["metadata"]["cvss3"],
+            "author": doc["metadata"]["author"],
+            "vulid": doc["metadata"]["vulid"],
+            "source": doc["metadata"]["source"],
+        }
+        buffer.append(entity)
+
+        # buffer 满了就批量插入
+        if len(buffer) >= insert_batch_size:
+            client.insert(collection_name=collection_name, data=buffer)
+            total_inserted += len(buffer)
+            logger.info(f"  Inserted {total_inserted}/{len(docs)} entities")
+            buffer = []
+
+    # 最后余数也插入
+    if buffer:
+        client.insert(collection_name=collection_name, data=buffer)
+        total_inserted += len(buffer)
+        logger.info(f"  Inserted {total_inserted}/{len(docs)} entities")
+
+    client.load_collection(collection_name=collection_name)
+
+    return {
+        "status": "success",
+        "items": total_inserted,
+        "collection_name": collection_name,
+    }
+
+
+
+def ingest_xml_faq(file_path: str, collection_name: str = "faq") -> dict:
     """专用 XML FAQ 导入
 
     XML 格式示例:
@@ -368,17 +583,14 @@ def ingest_xml FAQ(file_path: str, collection_name: str = "faq") -> dict:
     if not docs:
         return {"status": "no_data", "items": 0}
 
-    from langchain.schema import Document
+    from langchain_core.documents import Document
 
     documents = [
         Document(page_content=doc["content"], metadata=doc["metadata"])
         for doc in docs
     ]
 
-    embeddings = OpenAIEmbeddings(
-        model=settings.EMBEDDING_MODEL,
-        api_key=settings.OPENAI_API_KEY
-    )
+    embeddings = embedding_service.embeddings
 
     vector_store = Milvus.from_documents(
         documents=documents,
@@ -407,7 +619,7 @@ def main():
     path = Path(args.path)
 
     if not path.exists():
-        print(f"Path not found: {path}")
+        logger.error(f"Path not found: {path}")
         return
 
     if path.is_dir():
@@ -420,16 +632,22 @@ def main():
     else:
         suffix = path.suffix.lower()
         if suffix == ".xml":
-            result = ingest_xml_faq(str(path), args.collection)
+            # 检测 XML 格式：plugins.xml 使用 <RECORD> 标签
+            with open(str(path), "r", encoding="utf-8") as f:
+                content = f.read(500)
+            if "<RECORD>" in content or "pluginid" in content:
+                result = ingest_plugins_xml(str(path), args.collection)
+            # else:
+            #     result = ingest_xml_faq(str(path), args.collection)
         elif suffix in {".db", ".sqlite", ".sqlite3"}:
             if args.table:
                 docs = load_document(str(path))
                 texts = parse_sqlite_table(str(path), args.table)
-                from langchain.schema import Document
+                from langchain_core.documents import Document
                 docs = [Document(page_content=text, metadata={"source": f"{path.name}:{args.table}"}) for text in texts]
             else:
                 texts = parse_sqlite(str(path))
-                from langchain.schema import Document
+                from langchain_core.documents import Document
                 docs = [Document(page_content=text, metadata={"source": str(path.name)}) for text in texts]
 
             text_splitter = RecursiveCharacterTextSplitter(
@@ -439,10 +657,7 @@ def main():
             )
             chunks = text_splitter.split_documents(docs)
 
-            embeddings = OpenAIEmbeddings(
-                model=settings.EMBEDDING_MODEL,
-                api_key=settings.OPENAI_API_KEY
-            )
+            embeddings = embedding_service.embeddings
 
             vector_store = Milvus.from_documents(
                 documents=chunks,
@@ -458,7 +673,7 @@ def main():
             }
         else:
             docs = load_document(str(path))
-            print(f"Loaded {len(docs)} documents")
+            logger.info(f"Loaded {len(docs)} documents")
 
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=args.chunk_size,
@@ -467,10 +682,7 @@ def main():
             )
             chunks = text_splitter.split_documents(docs)
 
-            embeddings = OpenAIEmbeddings(
-                model=settings.EMBEDDING_MODEL,
-                api_key=settings.OPENAI_API_KEY
-            )
+            embeddings = embedding_service.embeddings
 
             vector_store = Milvus.from_documents(
                 documents=chunks,
@@ -485,7 +697,7 @@ def main():
                 "collection_name": args.collection,
             }
 
-    print(f"\nResult: {result}")
+    logger.info(f"\nResult: {result}")
 
 
 if __name__ == "__main__":

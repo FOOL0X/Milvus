@@ -1,15 +1,12 @@
 from langchain_community.vectorstores import Milvus
-from langchain_openai import OpenAIEmbeddings
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
 from .config import settings
+from .embeddings import embedding_service
 
 
 class VectorStoreService:
     def __init__(self):
-        self.embeddings = OpenAIEmbeddings(
-            model=settings.EMBEDDING_MODEL,
-            api_key=settings.OPENAI_API_KEY
-        )
+        self.embeddings = embedding_service.embeddings
         self.vector_store = None
 
     def connect(self):
@@ -39,10 +36,31 @@ class VectorStoreService:
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="chunk_text", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=256),
-            FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="plugin_id", dtype=DataType.VARCHAR, max_length=64),
+            FieldSchema(name="plugin_name", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="plugin_name_en", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="product_name", dtype=DataType.VARCHAR, max_length=256),
+            FieldSchema(name="product_version", dtype=DataType.VARCHAR, max_length=128),
+            FieldSchema(name="description", dtype=DataType.VARCHAR, max_length=8192),
+            FieldSchema(name="description_en", dtype=DataType.VARCHAR, max_length=8192),
             FieldSchema(name="category", dtype=DataType.VARCHAR, max_length=128),
-            FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=2048),
+            FieldSchema(name="holetype", dtype=DataType.VARCHAR, max_length=64),
+            FieldSchema(name="level", dtype=DataType.INT64),
+            FieldSchema(name="cvss2", dtype=DataType.FLOAT),
+            FieldSchema(name="cvss3", dtype=DataType.FLOAT),
+            FieldSchema(name="cvss3_vector", dtype=DataType.VARCHAR, max_length=256),
+            FieldSchema(name="author", dtype=DataType.VARCHAR, max_length=128),
+            FieldSchema(name="disclosure_date", dtype=DataType.VARCHAR, max_length=32),
+            FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="relative_path", dtype=DataType.VARCHAR, max_length=512),
+            FieldSchema(name="product_id", dtype=DataType.INT64),
+            FieldSchema(name="tags", dtype=DataType.VARCHAR, max_length=1024),
+            FieldSchema(name="local_options", dtype=DataType.VARCHAR, max_length=4096),
+            FieldSchema(name="dangerous", dtype=DataType.INT64),
+            FieldSchema(name="priority", dtype=DataType.INT64),
+            FieldSchema(name="create_time", dtype=DataType.VARCHAR, max_length=32),
+            FieldSchema(name="update_time", dtype=DataType.VARCHAR, max_length=32),
+            FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=4096),
         ]
 
         schema = CollectionSchema(fields=fields, description="Customer Service Knowledge Base")

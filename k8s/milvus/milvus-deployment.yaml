@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - name: milvus
-          image: milvusdb/milvus:v2.4.0
+          image: milvusdb/milvus:v2.6.15
           ports:
             - containerPort: 19530
               name: milvus
