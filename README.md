@@ -14,7 +14,7 @@
 ## 🏗️ 系统架构
 
 ```mermaid
-graph TB
+graph LR
     subgraph 用户
         U[👤 用户]
     end
@@ -23,18 +23,18 @@ graph TB
         FE[React + TypeScript<br/>Tailwind CSS + Zustand]
     end
 
-    subgraph Nginx
-        NX[Nginx 反向代理<br/>:80]
+    subgraph 网关
+        NX[Nginx :80]
     end
 
     subgraph 后端
         API[FastAPI + LangChain]
         SEARCH[混合检索引擎]
-        SESSION[会话管理<br/>SQLite]
+        SESSION[(会话存储<br/>SQLite)]
     end
 
     subgraph 向量数据库
-        MIL[Milvus 2.5<br/>HNSW + Sparse Index]
+        MIL[(Milvus 2.5<br/>HNSW + Sparse Index)]
     end
 
     subgraph AI 服务
@@ -43,21 +43,23 @@ graph TB
     end
 
     subgraph 数据导入
-        INGEST[ingest_data.py<br/>ingest_plugins.py]
-        DATA[多格式数据源<br/>XML / PDF / DOCX / MD / JSON / SQLite]
+        INGEST[导入脚本<br/>ingest_data.py<br/>ingest_plugins.py]
+        DATA[多格式数据源<br/>XML / PDF / DOCX<br/>MD / JSON / SQLite]
     end
 
-    U -->|自然语言提问| FE
-    FE -->|HTTP| NX
-    NX -->|/api/*| API
-    API -->|问题| SEARCH
-    API -->|存取| SESSION
-    SEARCH -->|Dense 检索| MIL
-    SEARCH -->|Embedding| EMB
-    SEARCH -->|生成回答| LLM
-    INGEST -->|Dense + Sparse<br/>双向量写入| MIL
-    INGEST -->|Embedding| EMB
+    U <-->|交互| FE
+    FE <-->|HTTP| NX
+    NX <-->|/api/*| API
+    API <-->|存取| SESSION
+    API -->|1.问题| SEARCH
+    SEARCH -->|2.生成向量| EMB
+    SEARCH -->|3.检索| MIL
+    MIL -->|4.返回文档| SEARCH
+    SEARCH -->|5.上下文+问题| LLM
+    LLM -->|6.生成回答| API
     DATA -->|解析| INGEST
+    INGEST -->|写入向量| MIL
+    INGEST -->|生成向量| EMB
 
     style U fill:#f9f,stroke:#333
     style FE fill:#61dafb,stroke:#333,color:#000
@@ -66,11 +68,9 @@ graph TB
     style SEARCH fill:#ff9800,stroke:#333,color:#000
     style SESSION fill:#9c27b0,stroke:#333,color:#fff
     style MIL fill:#00b4d8,stroke:#333,color:#000
-    style OLLAMA fill:#7c3aed,stroke:#333,color:#fff
     style EMB fill:#7c3aed,stroke:#333,color:#fff
     style LLM fill:#ef4444,stroke:#333,color:#fff
     style INGEST fill:#f59e0b,stroke:#333,color:#000
-    style XML fill:#6b7280,stroke:#333,color:#fff
     style DATA fill:#6b7280,stroke:#333,color:#fff
 ```
 
