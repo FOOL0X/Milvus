@@ -34,9 +34,6 @@ Thumbs.db
 volumes/
 *.pid
 
-# Local models
-models/
-
 # Data
 data/plugins.xml
 backend/data/
