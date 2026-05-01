@@ -1,127 +1,139 @@
-# RAG 智能客服助手
+# 🛡️ 漏洞智能客服
 
-基于 RAG（检索增强生成）+ Milvus 向量数据库的智能客服系统。
+基于 RAG（检索增强生成）+ Milvus 向量数据库的安全漏洞智能查询系统。上传漏洞知识库，即可通过自然语言查询漏洞详情、修复建议等信息。
 
-## 技术栈
+## ✨ 功能特性
 
-| 组件 | 技术 |
+- 🔍 **智能漏洞查询** — 输入自然语言问题，自动检索匹配漏洞并生成专业回答
+- 📊 **混合检索** — Dense Vector + BM25 Sparse 双路召回 + RRF 融合排序
+- 💬 **多轮对话** — 支持上下文连续问答，对话历史自动持久化
+- 📋 **会话管理** — 侧边栏会话列表，支持切换和删除，标题自动生成
+- 📄 **多格式导入** — 支持 XML / JSON / PDF / DOCX / TXT / MD / SQLite
+- 🐳 **一键部署** — Docker Compose 一键启动全栈服务
+
+## 🏗️ 技术栈
+
+| 层级 | 技术 |
 |------|------|
-| 前端 | React 18 + Vite + Tailwind + Zustand |
-| 后端 | FastAPI + LangChain |
-| 向量库 | Milvus 2.5 + (外部 etcd) |
-| LLM | GPT-4o / Claude 3.5 |
-| 部署 | Docker Compose / Kubernetes |
-| 反向代理 | Nginx |
+| 前端 | React 18 + TypeScript + Vite + Tailwind CSS + Zustand |
+| 后端 | FastAPI + LangChain + Pydantic |
+| 向量库 | Milvus 2.5 (HNSW + Sparse Inverted Index) |
+| Embedding | Ollama (bge-m3 / qwen3-embedding) |
+| LLM | OpenAI 兼容 API (MiniMax / DeepSeek / OpenAI) |
+| 部署 | Docker Compose + Nginx |
 
-## 快速开始
+## 🚀 快速开始
 
-### 1. 环境准备
+### 前置条件
+
+- [Docker](https://docs.docker.com/get-docker/) & Docker Compose
+- [Ollama](https://ollama.ai) (本地 Embedding 服务)
+- OpenAI 兼容 API Key
+
+### 1. 克隆项目
 
 ```bash
-# 克隆项目
-git clone https://github.com/your-org/customer-service-rag.git
-cd customer-service-rag
+git clone https://github.com/open0x/Milvus.git
+cd Milvus
+```
 
-# 复制环境变量文件并填入你的 API Key
+### 2. 配置环境变量
+
+```bash
 cp .env.example .env
-# 编辑 .env 文件，填入 OPENAI_API_KEY
+```
 
-# 构建前端（如需要）
+编辑 `.env`，填入以下必要配置：
+
+```env
+OPENAI_API_KEY=your-api-key          # LLM API Key
+OPENAI_API_BASE=https://api.minimaxi.com/v1  # LLM API 地址
+OPENAI_MODEL=MiniMax-M2.7            # LLM 模型名
+OLLAMA_BASE_URL=http://localhost:11434  # Ollama 地址
+```
+
+### 3. 启动 Ollama 并拉取 Embedding 模型
+
+```bash
+ollama pull bge-m3
+```
+
+### 4. 构建前端 & 启动服务
+
+```bash
 cd frontend && npm install && npm run build && cd ..
-```
-
-### 2. Docker Compose 启动（开发环境）
-
-```bash
-docker-compose up -d
-
-# 访问 http://localhost
-```
-
-### 3. 生产环境变量管理
-
-**方式一：Docker Compose (.env 文件)**
-```bash
-cp .env.example .env
-# 编辑 .env 填入密钥
 docker-compose up -d
 ```
 
-**方式二：K8s Secret（生产推荐）**
+访问 http://localhost 即可使用。
+
+### 5. 导入漏洞数据
 
 ```bash
-# 创建 secret
-kubectl create secret generic rag-secret \
-  --from-literal=OPENAI_API_KEY=your-api-key
-
-# 部署时引用 secret
-kubectl apply -f k8s/secret.yaml
+# 在后端容器内执行
+docker cp data/plugins.xml rag-backend:/app/plugins.xml
+docker cp backend/scripts/ingest_plugins.py rag-backend:/app/ingest_plugins.py
+docker exec rag-backend .venv/bin/python /app/ingest_plugins.py \
+  --path /app/plugins.xml --collection vuln_kb --batch-size 50
 ```
 
-### 3. Kubernetes 部署（生产环境）
-
-```bash
-# 1. 创建 namespace 和配置
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/secret.yaml
-
-# 2. 部署 Milvus
-kubectl apply -f k8s/milvus/milvus-deployment.yaml
-
-# 3. 部署后端和前端
-kubectl apply -f k8s/backend/
-kubectl apply -f k8s/frontend/
-
-# 4. 部署 Ingress
-kubectl apply -f k8s/ingress.yaml
-```
-
-## 项目结构
+## 📁 项目结构
 
 ```
-customer-service-rag/
-├── backend/                    # Python 后端
+Milvus/
+├── backend/
 │   ├── src/
-│   │   ├── api/               # API 路由
-│   │   ├── core/              # 核心配置
-│   │   ├── services/          # 业务逻辑
-│   │   └── models/            # 数据模型
-│   └── requirements.txt
-├── frontend/                   # React 前端
+│   │   ├── api/routers/        # FastAPI 路由 (chat, ingest)
+│   │   ├── core/               # 配置、Embedding、向量库、日志
+│   │   ├── services/           # 搜索服务、对话服务、会话存储
+│   │   └── models/             # Pydantic 数据模型
+│   └── scripts/                # 数据导入脚本
+├── frontend/
 │   └── src/
-│       ├── api/               # API 调用
-│       ├── components/        # React 组件
-│       └── stores/            # 状态管理
-├── k8s/                       # Kubernetes 配置
+│       ├── api/                # API 调用封装
+│       ├── components/         # React 组件
+│       └── stores/             # Zustand 状态管理
+├── nginx/                      # Nginx 反向代理配置
+├── data/                       # 数据文件目录
 └── docker-compose.yml
 ```
 
-## API 接口
+## 📡 API 接口
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/api/chat` | POST | 发送消息 |
-| `/api/chat/history/{session_id}` | GET | 获取会话历史 |
-| `/api/ingest` | POST | 上传文档 |
+| `/api/chat` | POST | 发送消息，返回回答和来源 |
+| `/api/chat/sessions` | GET | 获取会话列表 |
+| `/api/chat/history/{id}` | GET | 获取指定会话历史 |
+| `/api/chat/history/{id}` | DELETE | 删除指定会话 |
+| `/api/ingest` | POST | 上传文档到知识库 |
 | `/api/health` | GET | 健康检查 |
 
-## 开发
+### 示例请求
 
-### 后端开发
+```bash
+# 漏洞查询
+curl -X POST http://localhost/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "有哪些SQL注入漏洞？"}'
+
+# 继续同一会话
+curl -X POST http://localhost/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "如何修复？", "session_id": "xxx"}'
+```
+
+## 💻 本地开发
+
+### 后端
 
 ```bash
 cd backend
-
-# 安装 uv (如果没有)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 安装依赖并运行
 uv sync
-uv run uvicorn src.api.main:app --reload
+uv run uvicorn src.api.main:app --reload --port 8000
 ```
 
-### 前端开发
+### 前端
 
 ```bash
 cd frontend
@@ -129,106 +141,61 @@ npm install
 npm run dev
 ```
 
-## 知识库构建
+## 📥 知识库导入
 
-### 方式一：脚本导入（推荐用于批量数据）
+### 漏洞数据（plugins.xml）
 
 ```bash
-cd backend
+# 使用专用脚本导入，支持 dense + sparse 双向量
+python scripts/ingest_plugins.py --path data/plugins.xml --collection vuln_kb
 
-# 导入整个目录（支持 pdf, docx, txt, md, xml, json, sqlite）
-python scripts/ingest_data.py --path ./data/docs --collection customer_service_kb
+# 限制导入数量（测试用）
+python scripts/ingest_plugins.py --path data/plugins.xml --limit 200
+```
 
-# 导入 XML FAQ 文件
-python scripts/ingest_data.py --path ./data/sample_faq.xml --collection faq
+### 通用文档导入
 
-# 导入 Gatling 插件 XML（自动识别 plugins.xml 格式）
-python scripts/ingest_data.py --path ./plugins.xml --collection plugins
-
-# 导入 Markdown 文件
-python scripts/ingest_data.py --path ./data/sample_faq.md --collection faq
-
-# 导入 SQLite 数据库（所有表）
-python scripts/ingest_data.py --path ./data/app.db --collection knowledge
-
-# 导入 SQLite 指定表
-python scripts/ingest_data.py --path ./data/app.db --collection users --table users
+```bash
+# 支持格式：pdf, docx, txt, md, xml, json, sqlite
+python scripts/ingest_data.py --path ./data/docs --collection my_kb
 
 # 自定义分块参数
-python scripts/ingest_data.py --path ./data/docs \
-  --collection customer_service_kb \
-  --chunk-size 512 \
-  --chunk-overlap 100
+python scripts/ingest_data.py --path ./data/docs --collection my_kb \
+  --chunk-size 512 --chunk-overlap 100
 ```
 
-### 方式二：API 上传
-
-```bash
-# 通过 API 上传文档
-curl -X POST http://localhost:8000/api/ingest \
-  -F "file=@./policy.pdf" \
-  -F "collection_name=customer_service_kb" \
-  -F "category=policy"
-```
-
-### 支持的数据格式
-
-| 格式 | 扩展名 | 说明 |
-|------|--------|------|
-| PDF | .pdf | 自动提取文本 |
-| Word | .docx | 自动提取文本 |
-| 文本 | .txt | 纯文本文件 |
-| Markdown | .md | 自动按段落分割 |
-| XML | .xml | FAQ 专用格式 或 Gatling 插件格式 |
-| JSON | .json | 结构化数据 |
-| SQLite | .db, .sqlite, .sqlite3 | 数据库表数据 |
-
-### XML FAQ 格式示例
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<faq>
-    <item>
-        <question>你们支持退货吗？</question>
-        <answer>7天内支持退货，商品需保持原包装完好。</answer>
-        <category>售后</category>
-    </item>
-</faq>
-```
-
-### Gatling 插件 XML 格式示例
-
-自动检测 `pluginid` 字段识别为插件格式：
+### 漏洞 XML 格式
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <RECORDS>
     <RECORD>
-        <id>1175</id>
         <pluginid>ce35d2823e338cf9988b396540721312</pluginid>
-        <pluginname>某产品 漏洞名称</pluginname>
-        <pluginname_en>Product Vulnerability Name</pluginname_en>
-        <productname>product</productname>
-        <description>漏洞描述内容</description>
-        <description_en>Vulnerability description</description_en>
-        <author>author</author>
-        <category>webvul_webcms</category>
+        <pluginname>某产品 SQL注入漏洞</pluginname>
+        <productname>product_name</productname>
         <holetype>injection</holetype>
         <level>3</level>
         <cvss3>8.6</cvss3>
-        <disclosure_date>2020.12.09</disclosure_date>
+        <description>漏洞描述</description>
         <recommendation>修复建议</recommendation>
-        <recommendation_en>Recommendation</recommendation_en>
     </RECORD>
 </RECORDS>
 ```
 
-导入命令：
+## ⚙️ 环境变量
 
-```bash
-# 导入 Gatling 插件数据
-python scripts/ingest_data.py --path ./plugins.xml --collection plugins
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `OPENAI_API_KEY` | LLM API 密钥 | - |
+| `OPENAI_API_BASE` | LLM API 地址 | https://api.minimaxi.com/v1 |
+| `OPENAI_MODEL` | LLM 模型名 | MiniMax-M2.7 |
+| `OLLAMA_BASE_URL` | Ollama 服务地址 | http://localhost:11434 |
+| `OLLAMA_EMBEDDING_MODEL` | Embedding 模型 | bge-m3 |
+| `EMBEDDING_DIM` | 向量维度 | 1024 |
+| `MILVUS_URI` | Milvus 连接地址 | http://milvus:19530 |
+| `DEFAULT_COLLECTION` | 默认 Collection | vuln_kb |
+| `TOP_K` | 检索返回数量 | 5 |
 
-# 导入整个目录（自动识别格式）
-python scripts/ingest_data.py --path ./data/ --collection plugins
-```
+## 📄 License
+
+MIT
