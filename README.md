@@ -11,16 +11,82 @@
 - 📄 **多格式导入** — 支持 XML / JSON / PDF / DOCX / TXT / MD / SQLite
 - 🐳 **一键部署** — Docker Compose 一键启动全栈服务
 
-## 🏗️ 技术栈
+## 🏗️ 系统架构
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | React 18 + TypeScript + Vite + Tailwind CSS + Zustand |
-| 后端 | FastAPI + LangChain + Pydantic |
-| 向量库 | Milvus 2.5 (HNSW + Sparse Inverted Index) |
-| Embedding | Ollama (bge-m3 / qwen3-embedding) |
-| LLM | OpenAI 兼容 API (MiniMax / DeepSeek / OpenAI) |
-| 部署 | Docker Compose + Nginx |
+```mermaid
+graph TB
+    subgraph 用户
+        U[👤 用户]
+    end
+
+    subgraph 前端
+        FE[React + TypeScript<br/>Tailwind CSS + Zustand]
+    end
+
+    subgraph Nginx
+        NX[Nginx 反向代理<br/>:80]
+    end
+
+    subgraph 后端
+        API[FastAPI + LangChain]
+        SEARCH[混合检索引擎]
+        SESSION[会话管理<br/>SQLite]
+    end
+
+    subgraph 向量数据库
+        MIL[Milvus 2.5<br/>HNSW + Sparse Index]
+    end
+
+    subgraph AI 服务
+        OLLAMA[Ollama<br/>bge-m3 Embedding]
+        LLM[LLM API<br/>MiniMax / DeepSeek / OpenAI]
+    end
+
+    subgraph 数据导入
+        INGEST[ingest_plugins.py]
+        XML[plugins.xml<br/>漏洞知识库]
+    end
+
+    U -->|自然语言提问| FE
+    FE -->|HTTP| NX
+    NX -->|/api/*| API
+    API -->|问题| SEARCH
+    API -->|存取| SESSION
+    SEARCH -->|Dense 检索| MIL
+    SEARCH -->|Embedding| OLLAMA
+    SEARCH -->|生成回答| LLM
+    INGEST -->|Dense + Sparse<br/>双向量写入| MIL
+    INGEST -->|Embedding| OLLAMA
+    XML -->|解析| INGEST
+
+    style U fill:#f9f,stroke:#333
+    style FE fill:#61dafb,stroke:#333,color:#000
+    style NX fill:#009639,stroke:#333,color:#fff
+    style API fill:#009688,stroke:#333,color:#fff
+    style SEARCH fill:#ff9800,stroke:#333,color:#000
+    style SESSION fill:#9c27b0,stroke:#333,color:#fff
+    style MIL fill:#00b4d8,stroke:#333,color:#000
+    style OLLAMA fill:#7c3aed,stroke:#333,color:#fff
+    style LLM fill:#ef4444,stroke:#333,color:#fff
+    style INGEST fill:#f59e0b,stroke:#333,color:#000
+    style XML fill:#6b7280,stroke:#333,color:#fff
+```
+
+### 查询流程
+
+```
+用户提问 → 前端 → Nginx → FastAPI
+                              ↓
+                    Ollama 生成 Query Embedding
+                              ↓
+                    Milvus Dense + BM25 Sparse 双路检索
+                              ↓
+                    RRF 融合排序 → Top-K 文档
+                              ↓
+                    LLM 基于检索结果生成回答
+                              ↓
+                    返回回答 + 来源 ← 前端展示
+```
 
 ## 🚀 快速开始
 
@@ -96,31 +162,6 @@ Milvus/
 ├── nginx/                      # Nginx 反向代理配置
 ├── data/                       # 数据文件目录
 └── docker-compose.yml
-```
-
-## 📡 API 接口
-
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/api/chat` | POST | 发送消息，返回回答和来源 |
-| `/api/chat/sessions` | GET | 获取会话列表 |
-| `/api/chat/history/{id}` | GET | 获取指定会话历史 |
-| `/api/chat/history/{id}` | DELETE | 删除指定会话 |
-| `/api/ingest` | POST | 上传文档到知识库 |
-| `/api/health` | GET | 健康检查 |
-
-### 示例请求
-
-```bash
-# 漏洞查询
-curl -X POST http://localhost/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "有哪些SQL注入漏洞？"}'
-
-# 继续同一会话
-curl -X POST http://localhost/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "如何修复？", "session_id": "xxx"}'
 ```
 
 ## 💻 本地开发
