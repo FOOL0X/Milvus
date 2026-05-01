@@ -1,8 +1,25 @@
 # 🛡️ Vulnerability Intelligent Assistant
 
-A security vulnerability intelligent query system built on RAG (Retrieval-Augmented Generation) + Milvus vector database. Upload your vulnerability knowledge base and query vulnerability details, remediation advice, and more through natural language.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](backend/pyproject.toml)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/package.json)
+[![Milvus](https://img.shields.io/badge/Milvus-2.5-00A1EA?logo=milvus&logoColor=white)](https://milvus.io/)
 
 [中文文档](README.md)
+
+A security vulnerability intelligent query system built on RAG (Retrieval-Augmented Generation) + Milvus vector database. Upload your vulnerability knowledge base and query vulnerability details, remediation advice, and more through natural language.
+
+## 🧰 Tech Stack
+
+| Layer | Technology | Description |
+|-------|-----------|-------------|
+| Frontend | React 19 + TypeScript + Tailwind CSS | Modern SPA, Zustand state management |
+| Backend | FastAPI + LangChain | High-performance async API, RAG orchestration |
+| Vector DB | Milvus 2.5 | HNSW Dense + BM25 Sparse hybrid index |
+| Embedding | Ollama / ModelScope / OpenAI | Multi-provider embedding support |
+| LLM | MiniMax / DeepSeek / OpenAI | Multi-model compatible |
+| Deployment | Docker Compose + Nginx | One-click full-stack deployment |
 
 ## ✨ Features
 

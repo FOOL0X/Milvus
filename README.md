@@ -1,8 +1,25 @@
 # 🛡️ 漏洞智能客服
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](backend/pyproject.toml)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](frontend/package.json)
+[![Milvus](https://img.shields.io/badge/Milvus-2.5-00A1EA?logo=milvus&logoColor=white)](https://milvus.io/)
+
 [English](README_EN.md)
 
 基于 RAG（检索增强生成）+ Milvus 向量数据库的安全漏洞智能查询系统。上传漏洞知识库，即可通过自然语言查询漏洞详情、修复建议等信息。
+
+## 🧰 技术栈
+
+| 层级 | 技术 | 说明 |
+|------|------|------|
+| 前端 | React 19 + TypeScript + Tailwind CSS | 现代化 SPA，Zustand 状态管理 |
+| 后端 | FastAPI + LangChain | 高性能异步 API，RAG 编排 |
+| 向量数据库 | Milvus 2.5 | HNSW Dense + BM25 Sparse 混合索引 |
+| Embedding | Ollama / ModelScope / OpenAI | 多厂商 Embedding 支持 |
+| LLM | MiniMax / DeepSeek / OpenAI | 多模型兼容 |
+| 部署 | Docker Compose + Nginx | 一键全栈部署 |
 
 ## ✨ 功能特性
 
