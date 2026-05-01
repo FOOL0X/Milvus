@@ -38,13 +38,13 @@ graph TB
     end
 
     subgraph AI 服务
-        OLLAMA[Ollama<br/>bge-m3 Embedding]
+        EMB[Embedding 服务<br/>Ollama / ModelScope / OpenAI]
         LLM[LLM API<br/>MiniMax / DeepSeek / OpenAI]
     end
 
     subgraph 数据导入
-        INGEST[ingest_plugins.py]
-        XML[plugins.xml<br/>漏洞知识库]
+        INGEST[ingest_data.py<br/>ingest_plugins.py]
+        DATA[多格式数据源<br/>XML / PDF / DOCX / MD / JSON / SQLite]
     end
 
     U -->|自然语言提问| FE
@@ -53,11 +53,11 @@ graph TB
     API -->|问题| SEARCH
     API -->|存取| SESSION
     SEARCH -->|Dense 检索| MIL
-    SEARCH -->|Embedding| OLLAMA
+    SEARCH -->|Embedding| EMB
     SEARCH -->|生成回答| LLM
     INGEST -->|Dense + Sparse<br/>双向量写入| MIL
-    INGEST -->|Embedding| OLLAMA
-    XML -->|解析| INGEST
+    INGEST -->|Embedding| EMB
+    DATA -->|解析| INGEST
 
     style U fill:#f9f,stroke:#333
     style FE fill:#61dafb,stroke:#333,color:#000
@@ -67,9 +67,11 @@ graph TB
     style SESSION fill:#9c27b0,stroke:#333,color:#fff
     style MIL fill:#00b4d8,stroke:#333,color:#000
     style OLLAMA fill:#7c3aed,stroke:#333,color:#fff
+    style EMB fill:#7c3aed,stroke:#333,color:#fff
     style LLM fill:#ef4444,stroke:#333,color:#fff
     style INGEST fill:#f59e0b,stroke:#333,color:#000
     style XML fill:#6b7280,stroke:#333,color:#fff
+    style DATA fill:#6b7280,stroke:#333,color:#fff
 ```
 
 ### 查询流程
@@ -77,7 +79,7 @@ graph TB
 ```
 用户提问 → 前端 → Nginx → FastAPI
                               ↓
-                    Ollama 生成 Query Embedding
+                    Embedding 服务生成 Query 向量
                               ↓
                     Milvus Dense + BM25 Sparse 双路检索
                               ↓
@@ -93,8 +95,10 @@ graph TB
 ### 前置条件
 
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose
-- [Ollama](https://ollama.ai) (本地 Embedding 服务)
-- OpenAI 兼容 API Key
+- Embedding 服务（以下任选其一）：
+  - [Ollama](https://ollama.ai)（本地部署，推荐）
+  - ModelScope / OpenAI 兼容 API（云端调用）
+- LLM API Key（MiniMax / DeepSeek / OpenAI 等）
 
 ### 1. 克隆项目
 
@@ -115,14 +119,34 @@ cp .env.example .env
 OPENAI_API_KEY=your-api-key          # LLM API Key
 OPENAI_API_BASE=https://api.minimaxi.com/v1  # LLM API 地址
 OPENAI_MODEL=MiniMax-M2.7            # LLM 模型名
-OLLAMA_BASE_URL=http://localhost:11434  # Ollama 地址
+
+# Embedding 配置（三选一）
+# 方式一：Ollama 本地部署（推荐）
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_EMBEDDING_MODEL=bge-m3
+
+# 方式二：ModelScope 云端 API
+# EMBEDDING_API_BASE=https://api-inference.modelscope.cn/v1
+# MODELSCOPE_API_KEY=your-modelscope-api-key
+# EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
+
+# 方式三：OpenAI 兼容 API
+# EMBEDDING_API_BASE=https://api.openai.com/v1
+# OPENAI_API_KEY=your-api-key
+# EMBEDDING_MODEL=text-embedding-3-small
 ```
 
-### 3. 启动 Ollama 并拉取 Embedding 模型
+### 3. 启动 Embedding 服务
+
+**方式一：Ollama 本地部署（推荐）**
 
 ```bash
 ollama pull bge-m3
 ```
+
+**方式二：云端 API**
+
+无需本地部署，配置好 `.env` 中的 API Key 和地址即可。
 
 ### 4. 构建前端 & 启动服务
 
@@ -133,14 +157,21 @@ docker-compose up -d
 
 访问 http://localhost 即可使用。
 
-### 5. 导入漏洞数据
+### 5. 导入知识库数据
 
 ```bash
 # 在后端容器内执行
+
+# 导入漏洞 XML 数据（专用脚本，支持 dense + sparse 双向量）
 docker cp data/plugins.xml rag-backend:/app/plugins.xml
 docker cp backend/scripts/ingest_plugins.py rag-backend:/app/ingest_plugins.py
 docker exec rag-backend .venv/bin/python /app/ingest_plugins.py \
   --path /app/plugins.xml --collection vuln_kb --batch-size 50
+
+# 或使用通用导入脚本（支持多格式）
+docker cp backend/scripts/ingest_data.py rag-backend:/app/ingest_data.py
+docker exec rag-backend .venv/bin/python /app/ingest_data.py \
+  --path /app/data/docs --collection my_kb
 ```
 
 ## 📁 项目结构
@@ -184,7 +215,20 @@ npm run dev
 
 ## 📥 知识库导入
 
-### 漏洞数据（plugins.xml）
+### 支持的数据格式
+
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| 漏洞 XML | .xml | 漏洞插件格式（含 pluginid 字段自动识别） |
+| FAQ XML | .xml | 问答对格式 |
+| PDF | .pdf | 自动提取文本 |
+| Word | .docx | 自动提取文本 |
+| 文本 | .txt | 纯文本文件 |
+| Markdown | .md | 自动按段落分割 |
+| JSON | .json | 结构化数据 |
+| SQLite | .db, .sqlite, .sqlite3 | 数据库表数据 |
+
+### 漏洞数据导入（专用脚本）
 
 ```bash
 # 使用专用脚本导入，支持 dense + sparse 双向量
@@ -192,17 +236,26 @@ python scripts/ingest_plugins.py --path data/plugins.xml --collection vuln_kb
 
 # 限制导入数量（测试用）
 python scripts/ingest_plugins.py --path data/plugins.xml --limit 200
+
+# 自定义批次大小
+python scripts/ingest_plugins.py --path data/plugins.xml --collection vuln_kb --batch-size 50
 ```
 
 ### 通用文档导入
 
 ```bash
-# 支持格式：pdf, docx, txt, md, xml, json, sqlite
+# 导入单个文件（自动识别格式）
+python scripts/ingest_data.py --path ./data/docs/report.pdf --collection my_kb
+
+# 导入整个目录（批量处理）
 python scripts/ingest_data.py --path ./data/docs --collection my_kb
 
 # 自定义分块参数
 python scripts/ingest_data.py --path ./data/docs --collection my_kb \
   --chunk-size 512 --chunk-overlap 100
+
+# 导入 SQLite 指定表
+python scripts/ingest_data.py --path ./data/app.db --collection users --table users
 ```
 
 ### 漏洞 XML 格式
@@ -231,7 +284,9 @@ python scripts/ingest_data.py --path ./data/docs --collection my_kb \
 | `OPENAI_API_BASE` | LLM API 地址 | https://api.minimaxi.com/v1 |
 | `OPENAI_MODEL` | LLM 模型名 | MiniMax-M2.7 |
 | `OLLAMA_BASE_URL` | Ollama 服务地址 | http://localhost:11434 |
-| `OLLAMA_EMBEDDING_MODEL` | Embedding 模型 | bge-m3 |
+| `OLLAMA_EMBEDDING_MODEL` | Ollama Embedding 模型 | bge-m3 |
+| `EMBEDDING_API_BASE` | 云端 Embedding API 地址 | - |
+| `EMBEDDING_MODEL` | 云端 Embedding 模型名 | - |
 | `EMBEDDING_DIM` | 向量维度 | 1024 |
 | `MILVUS_URI` | Milvus 连接地址 | http://milvus:19530 |
 | `DEFAULT_COLLECTION` | 默认 Collection | vuln_kb |
